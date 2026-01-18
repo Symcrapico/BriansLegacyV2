@@ -1,8 +1,17 @@
-﻿@page
+@page
 @model PrivacyModel
 @{
     ViewData["Title"] = "Privacy Policy";
 }
-<h1>@ViewData["Title"]</h1>
 
-<p>Use this page to detail your site's privacy policy.</p>
+<div class="container-narrow">
+    <h1 class="text-3xl font-bold text-gray-900 mb-6">@ViewData["Title"]</h1>
+
+    <div class="prose prose-gray max-w-none">
+        <p class="text-gray-600 leading-relaxed">
+            Brian's Legacy is a private library for authorized team members only.
+            This page will detail the site's privacy policy regarding data handling,
+            document storage, and user information.
+        </p>
+    </div>
+</div>

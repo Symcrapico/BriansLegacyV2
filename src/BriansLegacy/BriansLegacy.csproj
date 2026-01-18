@@ -10,4 +10,25 @@
     <UserSecretsId>brianslegacy-dev</UserSecretsId>
   </PropertyGroup>
 
+  <!-- Tailwind CSS Build Integration -->
+  <Target Name="NpmInstall" BeforeTargets="BeforeBuild" Condition="!Exists('node_modules')">
+    <Exec Command="npm install" WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+
+  <Target Name="BuildTailwindCSS" BeforeTargets="BeforeBuild" DependsOnTargets="NpmInstall">
+    <Exec Command="npm run css:build" WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+
+  <Target Name="BuildTailwindCSSPublish" BeforeTargets="BeforePublish">
+    <Exec Command="npm run css:build" WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+
+  <!-- Exclude source CSS and node_modules from publish -->
+  <ItemGroup>
+    <Content Remove="Styles\**" />
+    <Content Remove="node_modules\**" />
+    <Content Remove="package*.json" />
+    <Content Remove="tailwind.config.js" />
+  </ItemGroup>
+
 </Project>

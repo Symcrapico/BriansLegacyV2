@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "tasks": {
-      "command": "node",
-      "args": [".claude/mcp-servers/tasks/dist/index.js"],
-      "cwd": "."
-    }
-  }
-}
