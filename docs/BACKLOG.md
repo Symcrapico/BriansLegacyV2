@@ -1,27 +1,22 @@
 # Backlog
 
-> Updated: 2026-01-18T21:42:47.317Z
-> Active: TASK-001-A-1
+> Updated: 2026-01-18T22:37:28.784Z
+> Active: None
 
 ---
 
 ## EPIC-001: Phase 1 - Foundation
-**Priority:** P1 | **Progress:** 0/11
+**Priority:** P1 | **Progress:** 0/6
 
-### FEAT-001-A: Project Scaffolding (0/3)
-
-| ID | Task | Status | Est |
-|----|------|--------|-----|
-| TASK-001-A-1 | Create ASP.NET Core 9.0 + Razor Pages project with solution structure matching FRMv2 patterns | 🟨 |  |
-| TASK-001-A-2 | Set up Tailwind CSS with build scripts (css:build, css:watch) | 🟦 |  |
-| TASK-001-A-3 | Create basic layout (_Layout.cshtml) and navigation | 🟦 |  |
-
-### FEAT-001-B: Database Setup (0/4)
+### FEAT-001-A: Project Scaffolding (0/0)
 
 | ID | Task | Status | Est |
 |----|------|--------|-----|
-| TASK-001-B-1 | Set up SQL Server + EF Core 9.0 with ApplicationDbContext | ⬜ |  |
-| TASK-001-B-2 | Create initial EF Core migration with all entities (LibraryItem, BookDetails, DocumentDetails, PlanDetails, LibraryFile, FileDerivative, ExtractedPageText, Category, Tag, ProcessingState, ProcessingLog, ReviewQueueItem) | ⬜ |  |
+
+### FEAT-001-B: Database Setup (0/2)
+
+| ID | Task | Status | Est |
+|----|------|--------|-----|
 | TASK-001-B-3 | Add all uniqueness constraints (ContentHash, FileDerivative composite, Category name, Tag name, ProcessingState) | ⬜ |  |
 | TASK-001-B-4 | Create docker-compose.yml for PostgreSQL + pgvector | ⬜ |  |
 
@@ -161,4 +156,10 @@
 
 ## Completed
 
-*No completed tasks yet.*
+| ID | Task | Completed | Commit |
+|----|------|-----------|--------|
+| TASK-001-B-2 | Create initial EF Core migration with all entities (LibraryItem, BookDetails, DocumentDetails, PlanDetails, LibraryFile, FileDerivative, ExtractedPageText, Category, Tag, ProcessingState, ProcessingLog, ReviewQueueItem) | 2026-01-18 22:37 |  |
+| TASK-001-B-1 | Set up SQL Server + EF Core 9.0 with ApplicationDbContext | 2026-01-18 22:24 |  |
+| TASK-001-A-3 | Create basic layout (_Layout.cshtml) and navigation | 2026-01-18 22:14 | 60ac36a |
+| TASK-001-A-2 | Set up Tailwind CSS with build scripts (css:build, css:watch) | 2026-01-18 22:10 | 60ac36a |
+| TASK-001-A-1 | Create ASP.NET Core 9.0 + Razor Pages project with solution structure matching FRMv2 patterns | 2026-01-18 21:46 | ac7e5b0 |
