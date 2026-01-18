@@ -42,57 +42,92 @@ Service Layer
 2. **Layered OCR Strategy**: Embedded text → Tesseract (local) → Cloud AI (escalation)
 3. **File Derivatives**: Track all processed outputs separately from originals
 4. **Embedding Versioning**: Store model/params to enable safe re-embedding
+5. **Idempotent Processing**: Jobs safe to re-run without creating duplicates
+6. **Page-Level Text Storage**: Per-page extraction for better citations and debugging
 
 ## Data Model
 
 ### SQL Server (EF Core)
 
-**LibraryItem** (base)
+**LibraryItem** (base entity with TPH inheritance)
 - Id (GUID), Type (Book/Document/Plan), Title, Description
 - Status (Pending/Processing/Review/Published/Failed)
-- ConfidenceScore (0-100)
+- ConfidenceScore (0-100) - AI's certainty
+- CompletenessScore (0-100) - Field presence score (NEW)
+- AcquisitionSource (e.g., "Brian Legacy Box 3") (NEW)
+- PhysicalLocation (shelf/box label, optional) (NEW)
 - CreatedAt, UpdatedAt, CreatedBy
 
 **BookDetails** (extends LibraryItem)
 - Author, Publisher, ISBN, Edition, Year, PageCount
+- Completeness: title+author+year+publisher+ISBN = 100%
 
 **DocumentDetails** (extends LibraryItem)
 - DocumentDate, DocumentNumber, Source, PageCount
+- Completeness: title+date+source+docNumber = 100%
 
-**PlanDetails** (extends LibraryItem) - Lower priority, Phase 2+
-- DrawingNumber, Revision, Scale, SheetNumber
+**PlanDetails** (extends LibraryItem)
+- DrawingNumber, DrawingTitle, ProjectName, Revision, Scale, SheetNumber, Discipline, Date
+- Completeness: drawingNumber+revision+title+date = 100%
 
 **LibraryFile**
-- Id, LibraryItemId, OriginalPath, FileType, SizeBytes, ContentHash
+- Id, LibraryItemId, OriginalPath, FileType, SizeBytes
+- ContentHash (SHA256) - UNIQUE INDEX for duplicate detection
 
-**FileDerivative** (NEW - per ChatGPT feedback)
+**FileDerivative**
 - Id, LibraryFileId, DerivativeType (Thumbnail/PageImage/ExtractedText/TitleBlockCrop)
-- Path, GeneratedAt, GeneratorVersion
+- Path, GeneratedAt, GeneratorVersion, InputHash
+- UNIQUE: (LibraryFileId, DerivativeType, GeneratorVersion, InputHash)
+
+**ExtractedPageText** (NEW - page-level storage)
+- Id, LibraryFileId, PageNumber
+- TextContent, TextPath (for large text, store as file)
+- Confidence (0-100), Method (Native/Tesseract/Gemini)
+- CreatedAt
 
 **Category** (hierarchical)
 - Id, Name, ParentId
+- UNIQUE: (ParentId, Name) - case-insensitive
 
 **Tag** (flat)
 - Id, Name
+- UNIQUE: Name (case-insensitive)
 
 **LibraryItemCategory** / **LibraryItemTag** (many-to-many)
+
+**ProcessingState** (NEW - current state per item)
+- Id, LibraryItemId (UNIQUE)
+- CurrentStep (ExtractText/OCRLocal/OCRCloud/Chunk/Embed/Categorize/Complete/Failed)
+- LastRunId (GUID), LastError, NextRetryAt, RetryCount, LockedUntil
+
+**ProcessingLog** (history)
+- Id, LibraryItemId, RunId (GUID), StartedAt, CompletedAt
+- ProcessorName, ProcessorVersion, Step, Status, ErrorMessage
+- InputHash, CostEstimate, RetryCount
 
 **ReviewQueueItem**
 - Id, LibraryItemId, AIExtractedData (JSON), FieldsNeedingReview (JSON)
 - ReviewedBy, ReviewedAt, Notes
 
-**ProcessingLog** (NEW - per ChatGPT feedback)
-- Id, LibraryItemId, RunId (GUID), StartedAt, CompletedAt
-- ProcessorName, ProcessorVersion, Status, ErrorMessage
-- InputHash, CostEstimate, RetryCount
-
 ### PostgreSQL + pgvector
 
 **DocumentChunk**
 - Id, LibraryItemId, ChunkIndex, Content (~500 tokens)
-- PageNumbers, Embedding (vector 1536), Metadata (JSON)
+- PageNumbers (array), Embedding (vector 1536), Metadata (JSON)
 - EmbeddingModel, EmbeddingVersion, ChunkingParams (JSON)
 - TextHash, CreatedAt
+- UNIQUE: (LibraryItemId, EmbeddingVersion, ChunkIndex, TextHash)
+
+### Uniqueness Constraints Summary
+
+| Table | Constraint | Purpose |
+|-------|-----------|---------|
+| LibraryFile | ContentHash | Detect duplicate uploads |
+| FileDerivative | (FileId, Type, Version, InputHash) | Safe reprocessing |
+| DocumentChunk | (ItemId, EmbedVersion, ChunkIdx, TextHash) | Safe re-embedding |
+| Category | (ParentId, Name) | No duplicate categories |
+| Tag | Name | No duplicate tags |
+| ProcessingState | LibraryItemId | One state per item |
 
 ## Category Taxonomy
 
@@ -134,7 +169,7 @@ AI auto-generates additional tags for cross-cutting details (years, railway comp
 
 ## AI Processing Pipeline
 
-### OCR Strategy (Layered - per ChatGPT feedback)
+### OCR Strategy (Layered)
 
 ```
 1. Check if PDF has embedded text
@@ -150,29 +185,48 @@ AI auto-generates additional tags for cross-cutting details (years, railway comp
    └── Failure → Mark for manual review
 ```
 
-This reduces cloud API costs by ~60-80% for mixed-quality collections.
+Cost savings: ~60-80% for mixed-quality collections.
+
+### Text Cleanup Pipeline (NEW)
+
+Before chunking, apply deterministic cleanup:
+1. Remove repeated headers/footers (lines appearing on 3+ pages)
+2. Remove standalone page numbers
+3. Normalize whitespace (collapse multiple spaces, preserve meaningful line breaks)
+4. Remove boilerplate stamps (date stamps, "COPY", etc.)
+5. Preserve table structure (line breaks matter for tables)
 
 ### Books (single cover photo)
 1. Admin uploads single high-res photo (cover + spine + back visible)
 2. **Background Job**: Vision AI auto-crops regions, extracts metadata
 3. AI assigns categories/tags from taxonomy
-4. If confidence < 80% → review queue
-5. Admin reviews/corrects → publish
+4. Calculate CompletenessScore based on field presence
+5. If confidence < 80% OR completeness < 60% → review queue
+6. Admin reviews/corrects → publish
 
 ### PDFs (documents)
 1. Upload PDF (single or bulk import)
-2. **Background Job**: Layered text extraction (see OCR Strategy above)
-3. Chunk into ~500-token segments with page numbers preserved
+2. **Background Job**:
+   - Layered text extraction (see OCR Strategy)
+   - Store text per page in ExtractedPageText
+   - Run text cleanup pipeline
+3. Chunk cleaned text into ~500-token segments with page numbers
 4. Generate embeddings, store in pgvector with versioning
 5. Claude analyzes first pages for metadata + categorization
-6. If confidence < 80% → review queue
-7. Admin reviews/corrects → publish
+6. Calculate CompletenessScore
+7. If confidence < 80% OR completeness < 60% → review queue
+8. Admin reviews/corrects → publish
 
-### Plans (lower priority - after books/PDFs)
+### Plans (title-block focused)
 1. Upload plan PDF
-2. **Background Job**: Extract title from first page (simple approach)
-3. Generate thumbnail preview
-4. Manual categorization initially, AI assist later
+2. **Background Job**:
+   - Rasterize page 1 at moderate DPI (150-200)
+   - Attempt title block crops (bottom-right, bottom, right side)
+   - OCR only the cropped regions (cheaper, faster)
+   - Store crop images as FileDerivative
+3. Extract: DrawingTitle, DrawingNumber, ProjectName, Revision, Date
+4. Generate thumbnail preview
+5. If extraction fails → full manual entry with crop images as hints
 
 ### AI Provider Strategy
 - **Gemini**: Primary for OCR/vision (better with handwriting and old scans)
@@ -182,35 +236,163 @@ This reduces cloud API costs by ~60-80% for mixed-quality collections.
 
 ## Search & Q&A
 
+### Hybrid Ranking Formula (NEW)
+
+```
+FinalScore = w1 * NormalizedKeyword
+           + w2 * NormalizedSemantic
+           + w3 * RecencyBoost
+           + w4 * TypeBoost
+           + w5 * FieldMatchBoost
+
+Default weights (configurable in appsettings):
+  w1 = 0.4  (keyword/BM25)
+  w2 = 0.5  (semantic/cosine)
+  w3 = 0.05 (recency - newer docs slightly preferred)
+  w4 = 0.05 (type boost - e.g., prefer Standards for regulatory queries)
+  w5 = 0.2  (field boost - title/docNumber matches weighted higher)
+
+Field Boosting:
+  Title match: 3x
+  DocumentNumber/DrawingNumber match: 3x
+  Tag match: 2x
+  Author match: 1.5x
+  Content match: 1x (baseline)
+```
+
 ### Search Types
 1. **Keyword** (SQL Server full-text): Exact matches on title, author, tags
 2. **Semantic** (pgvector): Conceptually similar content via embeddings
-3. **Hybrid** (default): Both combined and re-ranked
+3. **Hybrid** (default): Both combined using formula above
 
-### Q&A (RAG + General Knowledge)
+### Q&A (RAG with Retrieval Gates) (UPDATED)
+
+**Two-Mode Answering:**
+
+1. **Grounded Mode (default)**:
+   - Answer primarily from retrieved chunks
+   - General knowledge only for brief context
+   - Every substantive claim must have citation where possible
+   - If top_similarity < 0.65: respond with "Insufficient support in library. Try: [suggested refined searches]"
+
+2. **General Mode (explicit toggle)**:
+   - Broader engineering explanations allowed
+   - Still shows retrieved references separately
+   - Clear indicator: "This answer includes general engineering knowledge"
+
+**Q&A Pipeline:**
 1. User question → embedding
 2. Retrieve top 5-10 relevant chunks from pgvector
-3. Send chunks + question to Claude
-4. Claude answers using library content + general engineering knowledge
-5. **Clear warning**: "AI-generated content. Verify critical information."
-6. Response includes citations with document name + page numbers
-7. Audit log: which chunks were provided, model response
+3. **Retrieval gate**: If max(similarity) < 0.65, return "insufficient support" with search suggestions
+4. Send chunks + question to Claude with mode-appropriate prompt
+5. Claude answers with citations
+6. **Clear warning**: "AI-generated content. Verify critical information."
+7. Show which documents were used (audit transparency)
+8. Audit log: query, retrieved chunks, model response, mode, user
+
+## Security & File Serving (UPDATED)
+
+### Secure File Delivery
+- Store only internal file IDs in URLs: `/files/{fileId}` (never filesystem paths)
+- Validate access based on LibraryItemId and user role
+- Use Content-Disposition headers appropriately
+- Implement path traversal prevention in FileStorageService
+
+### Authentication & Authorization
+- ASP.NET Core Identity with Admin/Viewer roles
+- No anonymous access to any file endpoints
+- Session timeout aligned with FRMv2 (30 min idle)
+
+### API Key Security
+- Store in environment variables or Windows DPAPI
+- Never in appsettings.json in source control
+- Use user secrets for local development
+
+### Audit Logging
+- Logins (success/failure)
+- File downloads (who, what, when)
+- Q&A prompts and responses (metadata, not necessarily full text)
+- Processing job results
+
+## Backup & Recovery (NEW)
+
+### Components to Backup
+1. **SQL Server**: metadata, Hangfire state, Identity
+2. **PostgreSQL**: vectors, chunks
+3. **Filesystem**: originals, derivatives, thumbnails
+
+### Backup Strategy
+```
+Daily:
+- SQL Server: Full backup
+- PostgreSQL: pg_dump
+- Filesystem: Incremental backup of app_data/
+
+Weekly:
+- Full filesystem backup
+- Verify backup integrity
+
+Retention:
+- Daily: 7 days
+- Weekly: 4 weeks
+```
+
+### Restore Procedure (document this!)
+1. Stop IIS application pool
+2. Restore SQL Server from backup
+3. Restore PostgreSQL from pg_dump
+4. Restore filesystem to app_data/
+5. Verify file paths match database records
+6. Start application pool
+7. Run health check: `/health`
+
+## Monitoring (NEW)
+
+### Admin Dashboard Metrics
+- Items by status (Pending/Processing/Review/Published/Failed)
+- Review queue count
+- Processing job success/failure rate (last 24h)
+- Average processing time per item type
+- OCR escalation rate (local → cloud)
+- Estimated API costs (daily/weekly)
+
+### Alerts (optional, Phase 6)
+- Job failure rate > 10%
+- Review queue > 50 items
+- Disk space < 10GB
+
+## Book Capture Protocol (NEW)
+
+### Standard Operating Procedure
+1. **Resolution**: Minimum 12 MP camera/phone
+2. **Lighting**: Even, natural light preferred, no direct flash
+3. **Position**: Book laid flat, camera directly above (no angle)
+4. **Framing**: Cover, spine, and back all visible in single frame
+5. **Focus**: ISBN barcode region must be sharp
+6. **Re-take rule**: If ISBN region is blurry, re-take immediately
+
+### File Naming Convention
+```
+{BoxNumber}_{SequenceNumber}.jpg
+Example: Box03_0042.jpg
+```
 
 ## Pages
 
 ### Public (Viewer + Admin)
 - `/` - Home: search box + category grid
-- `/search` - Results with filters (material, type, year range)
-- `/ask` - Q&A chat interface with AI disclaimer
+- `/search` - Results with filters (material, type, year range, source)
+- `/ask` - Q&A chat interface with mode toggle and AI disclaimer
 - `/browse` - Category tree navigation
-- `/item/{id}` - Item detail + metadata + download link
-- `/item/{id}/view` - Embedded PDF viewer
+- `/item/{id}` - Item detail + metadata + download link + provenance
+- `/files/{fileId}` - Secure file download (authorized)
+- `/files/{fileId}/view` - Embedded PDF viewer
 
 ### Admin Only
-- `/admin` - Dashboard (stats, queue count, processing jobs)
+- `/admin` - Dashboard (stats, queue count, processing metrics, costs)
 - `/admin/upload` - Single item upload
 - `/admin/bulk` - Bulk import trigger/status/progress
-- `/admin/review` - Review queue (AI guesses vs editable fields)
+- `/admin/review` - Review queue (sorted by completeness, then confidence)
 - `/admin/items` - Manage all items (CRUD)
 - `/admin/categories` - Manage taxonomy
 - `/admin/users` - Manage users/roles
@@ -225,15 +407,9 @@ This reduces cloud API costs by ~60-80% for mixed-quality collections.
 | Cloud OCR fails | Mark for manual review with partial data |
 | Confidence < 50% all fields | Full manual entry with AI hints |
 | API rate limit/timeout | Queue retry with exponential backoff |
-| Duplicate file detected | Hash-based check, warn admin, show existing item |
-
-## Security & Audit
-
-- ASP.NET Core Identity with Admin/Viewer roles
-- No anonymous access to file endpoints
-- Files served through authorized controller (not static folder)
-- API keys in environment variables (not appsettings.json in source)
-- Audit logging for: logins, downloads, Q&A prompts/responses
+| Duplicate file detected | Hash check, warn admin, link to existing |
+| Job already running for item | Skip (LockedUntil check) |
+| Reprocessing same input | Skip if InputHash matches (idempotent) |
 
 ## Implementation Phases
 
@@ -241,20 +417,25 @@ This reduces cloud API costs by ~60-80% for mixed-quality collections.
 - [ ] Project scaffolding (ASP.NET Core 9.0 + Razor Pages)
 - [ ] Solution structure matching FRMv2 patterns
 - [ ] SQL Server + EF Core setup with migrations
+- [ ] All uniqueness constraints defined
 - [ ] Docker compose for PostgreSQL + pgvector
-- [ ] **Hangfire setup** (SQL Server storage) - moved from Phase 5
+- [ ] Hangfire setup (SQL Server storage)
 - [ ] ASP.NET Core Identity (Admin/Viewer roles)
 - [ ] Tailwind CSS setup
 - [ ] Basic layout and navigation
+- [ ] Secure file serving endpoint (`/files/{fileId}`)
 
 ### Phase 2: Core Library (Manual CRUD)
-- [ ] File upload service (local filesystem storage)
+- [ ] File upload service with hash-based duplicate detection
 - [ ] FileDerivative tracking
+- [ ] ExtractedPageText table
 - [ ] Manual metadata entry forms (books, documents)
+- [ ] Provenance fields (AcquisitionSource, PhysicalLocation)
+- [ ] CompletenessScore calculation
 - [ ] Category/tag management (admin)
 - [ ] Browse by category
-- [ ] Basic keyword search (SQL full-text)
-- [ ] Item detail pages
+- [ ] Basic keyword search (SQL full-text with field boosting)
+- [ ] Item detail pages with provenance display
 - [ ] Embedded PDF viewer
 - [ ] File download (authorized)
 
@@ -263,20 +444,25 @@ This reduces cloud API costs by ~60-80% for mixed-quality collections.
 - [ ] Claude provider implementation
 - [ ] Gemini provider implementation
 - [ ] Tesseract local OCR integration
-- [ ] Layered OCR pipeline
+- [ ] Layered OCR pipeline with page-level storage
+- [ ] Text cleanup pipeline
+- [ ] ProcessingState table + idempotent job logic
 - [ ] Book cover processing (vision + auto-crop)
 - [ ] PDF text extraction pipeline
+- [ ] Plan title-block cropping
 - [ ] Metadata extraction + auto-categorization
-- [ ] Review queue UI
+- [ ] Review queue UI (sorted by completeness)
 - [ ] ProcessingLog tracking
 
 ### Phase 4: Search & Q&A
 - [ ] pgvector connection from .NET (Npgsql)
 - [ ] Embedding generation service (with versioning)
-- [ ] Document chunking service
+- [ ] Document chunking service (with cleanup)
 - [ ] Semantic search implementation
-- [ ] Hybrid search (keyword + semantic merge)
-- [ ] RAG-based Q&A with citations
+- [ ] Hybrid search with explicit ranking formula
+- [ ] Field boosting configuration
+- [ ] RAG-based Q&A with retrieval gates
+- [ ] Two-mode answering (grounded/general)
 - [ ] AI disclaimer/warning display
 - [ ] Q&A audit logging
 
@@ -284,16 +470,17 @@ This reduces cloud API costs by ~60-80% for mixed-quality collections.
 - [ ] Bulk import background job
 - [ ] Progress tracking dashboard
 - [ ] Error reporting for failed items
+- [ ] Admin dashboard metrics (costs, rates)
 - [ ] Mobile responsive UI
 - [ ] Performance optimization
-- [ ] Audit logging completion
 
 ### Phase 6: Production Deploy
-- [ ] Production PostgreSQL setup (same server or separate)
+- [ ] Production PostgreSQL setup
 - [ ] IIS deployment alongside FRMv2
 - [ ] Production configuration
-- [ ] Backup strategy for both databases
-- [ ] Monitoring setup
+- [ ] Backup procedures documented and tested
+- [ ] Restore procedure documented and tested
+- [ ] Monitoring/alerting setup
 
 ## Local Development Setup
 
@@ -320,19 +507,36 @@ dotnet run
 
 ## Verification Checklist
 
-- [ ] Upload a book cover photo → AI extracts correct metadata
-- [ ] Upload a clear PDF → native text extracted, searchable
-- [ ] Upload an image-only PDF → Tesseract processes it
-- [ ] Upload a handwritten PDF → escalates to Gemini, extracts readable text
-- [ ] Low-confidence item → appears in review queue
-- [ ] ProcessingLog shows extraction history
-- [ ] Search "load calculations" → finds docs without exact phrase in title
-- [ ] Ask "What's the max span for timber trestle?" → returns answer with citation
-- [ ] Q&A shows AI disclaimer warning
+### Phase 1-2 (Manual CRUD)
+- [ ] Duplicate upload → warns about existing item (hash check)
+- [ ] File download → requires authentication
 - [ ] Viewer role → cannot access admin pages
 - [ ] Admin role → can upload, review, edit items
-- [ ] File download → requires authentication
-- [ ] Duplicate upload → warns about existing item
+- [ ] Provenance fields display on item detail
+
+### Phase 3 (AI)
+- [ ] Upload a book cover photo → AI extracts correct metadata
+- [ ] Upload a clear PDF → native text extracted per page
+- [ ] Upload an image-only PDF → Tesseract processes it
+- [ ] Upload a handwritten PDF → escalates to Gemini
+- [ ] Low-confidence item → appears in review queue
+- [ ] Low-completeness item → appears in review queue
+- [ ] ProcessingLog shows extraction history
+- [ ] Reprocessing same file → skips (idempotent)
+- [ ] Plan upload → title block cropped and OCR'd
+
+### Phase 4 (Search & Q&A)
+- [ ] Search "load calculations" → finds docs without exact phrase
+- [ ] Title match → ranked higher than content match
+- [ ] Q&A with good retrieval → grounded answer with citations
+- [ ] Q&A with weak retrieval → "insufficient support" message
+- [ ] Q&A general mode → shows general knowledge indicator
+- [ ] Q&A shows AI disclaimer warning
+
+### Phase 5-6 (Production)
+- [ ] Backup/restore procedure tested
+- [ ] Admin dashboard shows processing metrics
+- [ ] IIS deployment works alongside FRMv2
 
 ## Files to Create
 
@@ -355,10 +559,12 @@ BriansLegacyV2/
 │       │   ├── PlanDetails.cs
 │       │   ├── LibraryFile.cs
 │       │   ├── FileDerivative.cs
+│       │   ├── ExtractedPageText.cs
 │       │   ├── Category.cs
 │       │   ├── Tag.cs
-│       │   ├── ReviewQueueItem.cs
-│       │   └── ProcessingLog.cs
+│       │   ├── ProcessingState.cs
+│       │   ├── ProcessingLog.cs
+│       │   └── ReviewQueueItem.cs
 │       ├── Services/
 │       │   ├── AI/
 │       │   │   ├── IAIProvider.cs
@@ -366,13 +572,16 @@ BriansLegacyV2/
 │       │   │   ├── GeminiProvider.cs
 │       │   │   └── TesseractOcrService.cs
 │       │   ├── DocumentProcessorService.cs
+│       │   ├── TextCleanupService.cs
 │       │   ├── SearchService.cs
 │       │   ├── EmbeddingService.cs
 │       │   ├── FileStorageService.cs
+│       │   ├── CompletenessCalculator.cs
 │       │   └── QAService.cs
 │       ├── Jobs/
 │       │   ├── ProcessBookCoverJob.cs
 │       │   ├── ProcessPdfJob.cs
+│       │   ├── ProcessPlanJob.cs
 │       │   ├── GenerateEmbeddingsJob.cs
 │       │   └── BulkImportJob.cs
 │       ├── Pages/
@@ -382,7 +591,7 @@ BriansLegacyV2/
 │       │   ├── Browse.cshtml
 │       │   ├── Item.cshtml
 │       │   └── Admin/
-│       │       ├── Index.cshtml
+│       │       ├── Index.cshtml (dashboard with metrics)
 │       │       ├── Upload.cshtml
 │       │       ├── Bulk.cshtml
 │       │       ├── Review.cshtml
@@ -395,12 +604,29 @@ BriansLegacyV2/
 ├── docker-compose.yml
 ├── tailwind.config.js
 ├── package.json
+├── docs/
+│   ├── capture-protocol.md
+│   └── backup-restore.md
 └── README.md
 ```
 
 ## Changelog
 
-- **v2 (2026-01-18)**: Incorporated ChatGPT review feedback
+- **v3 (2026-01-18)**: Incorporated ChatGPT round 2 feedback
+  - Added ProcessingState table for current state + idempotent job logic
+  - Added uniqueness constraints for safe reprocessing
+  - Added ExtractedPageText for page-level text storage
+  - Added text cleanup pipeline before chunking
+  - Added explicit hybrid ranking formula with field boosting
+  - Added Q&A retrieval gates and two-mode answering
+  - Added CompletenessScore (field presence) separate from ConfidenceScore
+  - Added provenance fields (AcquisitionSource, PhysicalLocation)
+  - Added title-block cropping for Plans
+  - Added backup/restore procedures
+  - Added monitoring metrics for admin dashboard
+  - Added book capture protocol/SOP
+
+- **v2 (2026-01-18)**: Incorporated ChatGPT round 1 feedback
   - Added Hangfire background jobs to Phase 1
   - Added layered OCR strategy (Tesseract → Cloud escalation)
   - Added FileDerivative and ProcessingLog tables
