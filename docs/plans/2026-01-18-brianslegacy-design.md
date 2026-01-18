@@ -53,9 +53,7 @@ Service Layer
 - Id (GUID), Type (Book/Document/Plan), Title, Description
 - Status (Pending/Processing/Review/Published/Failed)
 - ConfidenceScore (0-100) - AI's certainty
-- CompletenessScore (0-100) - Field presence score (NEW)
-- AcquisitionSource (e.g., "Brian Legacy Box 3") (NEW)
-- PhysicalLocation (shelf/box label, optional) (NEW)
+- CompletenessScore (0-100) - Field presence score
 - CreatedAt, UpdatedAt, CreatedBy
 
 **BookDetails** (extends LibraryItem)
@@ -361,30 +359,14 @@ Retention:
 - Review queue > 50 items
 - Disk space < 10GB
 
-## Book Capture Protocol (NEW)
-
-### Standard Operating Procedure
-1. **Resolution**: Minimum 12 MP camera/phone
-2. **Lighting**: Even, natural light preferred, no direct flash
-3. **Position**: Book laid flat, camera directly above (no angle)
-4. **Framing**: Cover, spine, and back all visible in single frame
-5. **Focus**: ISBN barcode region must be sharp
-6. **Re-take rule**: If ISBN region is blurry, re-take immediately
-
-### File Naming Convention
-```
-{BoxNumber}_{SequenceNumber}.jpg
-Example: Box03_0042.jpg
-```
-
 ## Pages
 
 ### Public (Viewer + Admin)
 - `/` - Home: search box + category grid
-- `/search` - Results with filters (material, type, year range, source)
+- `/search` - Results with filters (material, type, year range)
 - `/ask` - Q&A chat interface with mode toggle and AI disclaimer
 - `/browse` - Category tree navigation
-- `/item/{id}` - Item detail + metadata + download link + provenance
+- `/item/{id}` - Item detail + metadata + download link
 - `/files/{fileId}` - Secure file download (authorized)
 - `/files/{fileId}/view` - Embedded PDF viewer
 
@@ -430,12 +412,11 @@ Example: Box03_0042.jpg
 - [ ] FileDerivative tracking
 - [ ] ExtractedPageText table
 - [ ] Manual metadata entry forms (books, documents)
-- [ ] Provenance fields (AcquisitionSource, PhysicalLocation)
 - [ ] CompletenessScore calculation
 - [ ] Category/tag management (admin)
 - [ ] Browse by category
 - [ ] Basic keyword search (SQL full-text with field boosting)
-- [ ] Item detail pages with provenance display
+- [ ] Item detail pages
 - [ ] Embedded PDF viewer
 - [ ] File download (authorized)
 
@@ -512,7 +493,6 @@ dotnet run
 - [ ] File download → requires authentication
 - [ ] Viewer role → cannot access admin pages
 - [ ] Admin role → can upload, review, edit items
-- [ ] Provenance fields display on item detail
 
 ### Phase 3 (AI)
 - [ ] Upload a book cover photo → AI extracts correct metadata
@@ -605,14 +585,13 @@ BriansLegacyV2/
 ├── tailwind.config.js
 ├── package.json
 ├── docs/
-│   ├── capture-protocol.md
 │   └── backup-restore.md
 └── README.md
 ```
 
 ## Changelog
 
-- **v3 (2026-01-18)**: Incorporated ChatGPT round 2 feedback
+- **v3 (2026-01-18)**: Incorporated ChatGPT round 2 feedback (user-reviewed)
   - Added ProcessingState table for current state + idempotent job logic
   - Added uniqueness constraints for safe reprocessing
   - Added ExtractedPageText for page-level text storage
@@ -620,11 +599,11 @@ BriansLegacyV2/
   - Added explicit hybrid ranking formula with field boosting
   - Added Q&A retrieval gates and two-mode answering
   - Added CompletenessScore (field presence) separate from ConfidenceScore
-  - Added provenance fields (AcquisitionSource, PhysicalLocation)
   - Added title-block cropping for Plans
   - Added backup/restore procedures
-  - Added monitoring metrics for admin dashboard
-  - Added book capture protocol/SOP
+  - Added full monitoring metrics for admin dashboard
+  - **Declined**: Provenance fields (not needed - all from Brian's collection)
+  - **Declined**: Formal capture protocol doc (verbal instructions sufficient)
 
 - **v2 (2026-01-18)**: Incorporated ChatGPT round 1 feedback
   - Added Hangfire background jobs to Phase 1
