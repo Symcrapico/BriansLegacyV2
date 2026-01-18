@@ -284,7 +284,9 @@ Field Boosting:
 3. **Retrieval gate**: If max(similarity) < 0.65, return "insufficient support" with search suggestions
 4. Send chunks + question to Claude with mode-appropriate prompt
 5. Claude answers with citations
-6. **Clear warning**: "AI-generated content. Verify critical information."
+6. **Context-aware disclaimer**:
+   - Grounded mode + strong retrieval: "AI-assisted summary with citations from library."
+   - General mode or weak retrieval: "AI-generated content. Consult original standards for critical decisions."
 7. Show which documents were used (audit transparency)
 8. Audit log: query, retrieved chunks, model response, mode, user
 
@@ -309,7 +311,9 @@ Field Boosting:
 ### Audit Logging
 - Logins (success/failure)
 - File downloads (who, what, when)
-- Q&A prompts and responses (metadata, not necessarily full text)
+- Q&A prompts and responses:
+  - Full text retained for 30 days (debugging)
+  - After 30 days: metadata only (user, timestamp, item IDs, similarity scores, cost)
 - Processing job results
 
 ## Backup & Recovery (NEW)
@@ -342,7 +346,15 @@ Retention:
 4. Restore filesystem to app_data/
 5. Verify file paths match database records
 6. Start application pool
-7. Run health check: `/health`
+7. Run health check: `/health` (validates all dependencies)
+
+### Health Endpoint
+`/health` validates:
+- SQL Server connectivity
+- PostgreSQL connectivity
+- Filesystem read/write to app_data/
+- Tesseract/OCR dependencies present
+- Hangfire server running
 
 ## Monitoring (NEW)
 
@@ -401,11 +413,12 @@ Retention:
 - [ ] SQL Server + EF Core setup with migrations
 - [ ] All uniqueness constraints defined
 - [ ] Docker compose for PostgreSQL + pgvector
-- [ ] Hangfire setup (SQL Server storage)
+- [ ] Hangfire setup (SQL Server storage, single queue)
 - [ ] ASP.NET Core Identity (Admin/Viewer roles)
 - [ ] Tailwind CSS setup
 - [ ] Basic layout and navigation
 - [ ] Secure file serving endpoint (`/files/{fileId}`)
+- [ ] Health endpoint with full dependency validation (`/health`)
 
 ### Phase 2: Core Library (Manual CRUD)
 - [ ] File upload service with hash-based duplicate detection
@@ -424,6 +437,7 @@ Retention:
 - [ ] AI service abstraction (IAIProvider interface)
 - [ ] Claude provider implementation
 - [ ] Gemini provider implementation
+- [ ] PDF rasterization library research and selection (for OCR/thumbnails)
 - [ ] Tesseract local OCR integration
 - [ ] Layered OCR pipeline with page-level storage
 - [ ] Text cleanup pipeline
@@ -452,6 +466,7 @@ Retention:
 - [ ] Progress tracking dashboard
 - [ ] Error reporting for failed items
 - [ ] Admin dashboard metrics (costs, rates)
+- [ ] Reprocessing UI (re-run OCR, re-embed, re-categorize per item)
 - [ ] Mobile responsive UI
 - [ ] Performance optimization
 
@@ -590,6 +605,17 @@ BriansLegacyV2/
 ```
 
 ## Changelog
+
+- **v4 (2026-01-18)**: Incorporated ChatGPT round 3 feedback (user-reviewed)
+  - Added Q&A log retention policy: 30 days full, then metadata only
+  - Added context-aware disclaimers (softer for grounded, stronger for general)
+  - Added full dependency validation in /health endpoint
+  - Added PDF rasterization research to Phase 3
+  - Added reprocessing UI to Phase 5
+  - Single Hangfire queue (keep simple for v1)
+  - No publish gate: all items visible to viewers regardless of status
+  - **Deferred**: NormalizedIdentifiers (add if regular search insufficient)
+  - **Declined again**: PhysicalRef field
 
 - **v3 (2026-01-18)**: Incorporated ChatGPT round 2 feedback (user-reviewed)
   - Added ProcessingState table for current state + idempotent job logic
