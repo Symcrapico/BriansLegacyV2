@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__tasks__status",
+      "mcp__tasks__add_epic",
+      "mcp__tasks__add_feature",
+      "mcp__tasks__create",
+      "mcp__tasks__list",
+      "mcp__tasks__current",
+      "mcp__tasks__start",
+      "mcp__tasks__complete",
+      "mcp__tasks__get",
+      "Skill(superpowers:brainstorming)",
+      "Skill(task)",
+      "Skill(server)",
+      "Bash(git log:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(ls:*)",
+      "Bash(dotnet build:*)",
+      "Bash(dotnet test:*)",
+      "Bash(dotnet run:*)",
+      "Bash(dotnet ef:*)",
+      "Bash(docker:*)",
+      "Bash(docker-compose:*)",
+      "Bash(npm:*)",
+      "Bash(node:*)",
+      "Bash(curl:*)"
+    ]
+  }
+}

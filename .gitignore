@@ -1,0 +1,76 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+
+# User-specific files
+*.rsuser
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# NuGet
+*.nupkg
+**/[Pp]ackages/*
+*.nuget.props
+*.nuget.targets
+project.lock.json
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# App data
+app_data/
+
+# Secrets
+appsettings.*.json
+!appsettings.json
+!appsettings.Development.json
+*.pfx
+*.key
+secrets.json
+
+# Tailwind
+wwwroot/css/output.css
+
+# Local Claude settings (keep in .gitignore for security)
+# .claude/settings.local.json
