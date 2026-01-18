@@ -20,6 +20,9 @@ public class ApplicationDbContext : DbContext
     {
     }
 
+    // Users (Google OAuth authenticated)
+    public DbSet<ApplicationUser> Users => Set<ApplicationUser>();
+
     // Library Items (TPH inheritance)
     public DbSet<LibraryItem> LibraryItems => Set<LibraryItem>();
     public DbSet<BookDetails> Books => Set<BookDetails>();
@@ -47,6 +50,21 @@ public class ApplicationDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        // =====================================================================
+        // ApplicationUser (Google OAuth)
+        // =====================================================================
+        modelBuilder.Entity<ApplicationUser>(entity =>
+        {
+            entity.ToTable("Users");
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.Email).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.DisplayName).HasMaxLength(200);
+
+            // UNIQUE: Email (one user per email)
+            entity.HasIndex(e => e.Email).IsUnique();
+        });
 
         // =====================================================================
         // LibraryItem - TPH Inheritance
