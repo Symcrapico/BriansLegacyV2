@@ -113,6 +113,9 @@ builder.Services.AddSingleton<FileStorageService>();
 // Library file service (scoped - uses DbContext)
 builder.Services.AddScoped<LibraryFileService>();
 
+// File derivative service (scoped - uses DbContext)
+builder.Services.AddScoped<FileDerivativeService>();
+
 // Health checks - validates all dependencies
 builder.Services.AddHealthChecks()
     .AddSqlServer(
