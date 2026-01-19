@@ -3,6 +3,8 @@
 // Purpose: Secure file storage operations with path traversal prevention
 // ============================================================================
 
+using System.Security.Cryptography;
+
 namespace BriansLegacy.Services;
 
 /// <summary>
@@ -140,4 +142,125 @@ public class FileStorageService
     /// Gets the base storage path.
     /// </summary>
     public string BasePath => _basePath;
+
+    /// <summary>
+    /// Stores a file and calculates its SHA256 hash for duplicate detection.
+    /// </summary>
+    /// <param name="stream">The file stream to store.</param>
+    /// <param name="originalFileName">Original filename (for extension extraction).</param>
+    /// <param name="category">Storage category (e.g., "originals", "derivatives").</param>
+    /// <returns>Result containing the relative path and content hash.</returns>
+    public async Task<FileStoreResult> StoreFileAsync(Stream stream, string originalFileName, string category = "originals")
+    {
+        // Generate storage path: category/yyyy/MM/guid.ext
+        var extension = Path.GetExtension(originalFileName).TrimStart('.').ToLowerInvariant();
+        var now = DateTime.UtcNow;
+        var fileId = Guid.NewGuid();
+        var relativePath = Path.Combine(category, now.ToString("yyyy"), now.ToString("MM"), $"{fileId}.{extension}");
+
+        var fullPath = GetSecurePath(relativePath);
+        if (fullPath == null)
+        {
+            throw new InvalidOperationException($"Failed to generate secure path for: {relativePath}");
+        }
+
+        // Ensure directory exists
+        var directory = Path.GetDirectoryName(fullPath)!;
+        Directory.CreateDirectory(directory);
+
+        // Calculate hash while copying to avoid reading stream twice
+        string contentHash;
+        long sizeBytes;
+
+        using (var sha256 = SHA256.Create())
+        using (var fileStream = new FileStream(fullPath, FileMode.Create, FileAccess.Write, FileShare.None))
+        using (var cryptoStream = new CryptoStream(fileStream, sha256, CryptoStreamMode.Write))
+        {
+            await stream.CopyToAsync(cryptoStream);
+            await cryptoStream.FlushFinalBlockAsync();
+
+            contentHash = Convert.ToHexString(sha256.Hash!).ToLowerInvariant();
+            sizeBytes = fileStream.Length;
+        }
+
+        _logger.LogInformation("Stored file: {RelativePath}, Hash: {Hash}, Size: {Size} bytes",
+            relativePath, contentHash, sizeBytes);
+
+        return new FileStoreResult
+        {
+            RelativePath = relativePath,
+            ContentHash = contentHash,
+            SizeBytes = sizeBytes,
+            FileType = extension
+        };
+    }
+
+    /// <summary>
+    /// Calculates SHA256 hash of a stream without storing it.
+    /// Useful for checking duplicates before upload.
+    /// </summary>
+    public static async Task<string> CalculateHashAsync(Stream stream)
+    {
+        using var sha256 = SHA256.Create();
+        var hashBytes = await sha256.ComputeHashAsync(stream);
+        return Convert.ToHexString(hashBytes).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Deletes a file from storage.
+    /// </summary>
+    /// <param name="relativePath">Path relative to storage base.</param>
+    /// <returns>True if deleted; false if file didn't exist or path invalid.</returns>
+    public bool DeleteFile(string relativePath)
+    {
+        var fullPath = GetSecurePath(relativePath);
+        if (fullPath == null || !File.Exists(fullPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            File.Delete(fullPath);
+            _logger.LogInformation("Deleted file: {RelativePath}", relativePath);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete file: {RelativePath}", relativePath);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Gets file size in bytes.
+    /// </summary>
+    public long? GetFileSize(string relativePath)
+    {
+        var fullPath = GetSecurePath(relativePath);
+        if (fullPath == null || !File.Exists(fullPath))
+        {
+            return null;
+        }
+
+        return new FileInfo(fullPath).Length;
+    }
+}
+
+/// <summary>
+/// Result of storing a file.
+/// </summary>
+public class FileStoreResult
+{
+    /// <summary>Relative path where file was stored.</summary>
+    public required string RelativePath { get; init; }
+
+    /// <summary>SHA256 hash of file content (lowercase hex).</summary>
+    public required string ContentHash { get; init; }
+
+    /// <summary>File size in bytes.</summary>
+    public required long SizeBytes { get; init; }
+
+    /// <summary>File extension/type (lowercase, no dot).</summary>
+    public required string FileType { get; init; }
 }

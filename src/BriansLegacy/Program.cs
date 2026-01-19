@@ -110,6 +110,9 @@ builder.Services.AddHangfireServer(options =>
 // File storage service
 builder.Services.AddSingleton<FileStorageService>();
 
+// Library file service (scoped - uses DbContext)
+builder.Services.AddScoped<LibraryFileService>();
+
 // Health checks - validates all dependencies
 builder.Services.AddHealthChecks()
     .AddSqlServer(
