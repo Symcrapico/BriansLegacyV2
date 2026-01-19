@@ -1,14 +1,18 @@
 using System.Security.Claims;
+using System.Text.Json;
 using BriansLegacy.Data;
 using BriansLegacy.Infrastructure;
 using BriansLegacy.Models;
 using BriansLegacy.Services;
 using Hangfire;
 using Hangfire.SqlServer;
+using HealthChecks.Hangfire;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -105,6 +109,24 @@ builder.Services.AddHangfireServer(options =>
 
 // File storage service
 builder.Services.AddSingleton<FileStorageService>();
+
+// Health checks - validates all dependencies
+builder.Services.AddHealthChecks()
+    .AddSqlServer(
+        builder.Configuration.GetConnectionString("DefaultConnection")!,
+        name: "sqlserver",
+        tags: ["db", "sql"])
+    .AddNpgSql(
+        builder.Configuration.GetConnectionString("VectorConnection")!,
+        name: "postgresql",
+        tags: ["db", "vector"])
+    .AddHangfire(options =>
+    {
+        options.MinimumAvailableServers = 1;
+    }, name: "hangfire", tags: ["jobs"])
+    .AddCheck<FileSystemHealthCheck>(
+        "filesystem",
+        tags: ["storage"]);
 
 builder.Services.AddRazorPages();
 
@@ -207,6 +229,36 @@ app.MapHangfireDashboard("/admin/jobs", new DashboardOptions
     DashboardTitle = "Brian's Legacy - Jobs",
     DisplayStorageConnectionString = false,
     Authorization = [new HangfireAuthorizationFilter()]
+});
+
+// Health endpoint - validates all dependencies (no auth required for monitoring)
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    ResponseWriter = async (context, report) =>
+    {
+        context.Response.ContentType = "application/json";
+
+        var result = new
+        {
+            status = report.Status.ToString(),
+            totalDuration = report.TotalDuration.TotalMilliseconds,
+            checks = report.Entries.Select(e => new
+            {
+                name = e.Key,
+                status = e.Value.Status.ToString(),
+                duration = e.Value.Duration.TotalMilliseconds,
+                description = e.Value.Description,
+                tags = e.Value.Tags
+            })
+        };
+
+        await context.Response.WriteAsync(
+            JsonSerializer.Serialize(result, new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            }));
+    }
 });
 
 app.MapStaticAssets();
