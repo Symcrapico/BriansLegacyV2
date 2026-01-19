@@ -2,6 +2,7 @@ using System.Security.Claims;
 using BriansLegacy.Data;
 using BriansLegacy.Infrastructure;
 using BriansLegacy.Models;
+using BriansLegacy.Services;
 using Hangfire;
 using Hangfire.SqlServer;
 using Microsoft.AspNetCore.Authentication;
@@ -102,6 +103,9 @@ builder.Services.AddHangfireServer(options =>
     options.WorkerCount = Environment.ProcessorCount * 2;
 });
 
+// File storage service
+builder.Services.AddSingleton<FileStorageService>();
+
 builder.Services.AddRazorPages();
 
 var app = builder.Build();
@@ -140,6 +144,62 @@ app.MapGet("/logout", async (HttpContext context) =>
     await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     return Results.Redirect("/");
 });
+
+// Secure file serving - download (requires authentication)
+app.MapGet("/files/{fileId:guid}", async (
+    Guid fileId,
+    ApplicationDbContext db,
+    FileStorageService fileStorage,
+    ILogger<Program> logger) =>
+{
+    var file = await db.LibraryFiles.FindAsync(fileId);
+    if (file == null)
+    {
+        logger.LogWarning("File not found: {FileId}", fileId);
+        return Results.NotFound();
+    }
+
+    var stream = fileStorage.OpenRead(file.OriginalPath);
+    if (stream == null)
+    {
+        logger.LogError("File exists in database but not on disk: {FileId}, Path: {Path}", fileId, file.OriginalPath);
+        return Results.NotFound();
+    }
+
+    var contentType = FileStorageService.GetContentType(file.FileType);
+    var fileName = Path.GetFileName(file.OriginalPath);
+
+    return Results.File(stream, contentType, fileName);
+})
+.RequireAuthorization("ViewerOrAdmin");
+
+// Secure file serving - inline view (for PDF viewer, requires authentication)
+app.MapGet("/files/{fileId:guid}/view", async (
+    Guid fileId,
+    ApplicationDbContext db,
+    FileStorageService fileStorage,
+    ILogger<Program> logger) =>
+{
+    var file = await db.LibraryFiles.FindAsync(fileId);
+    if (file == null)
+    {
+        logger.LogWarning("File not found for viewing: {FileId}", fileId);
+        return Results.NotFound();
+    }
+
+    var stream = fileStorage.OpenRead(file.OriginalPath);
+    if (stream == null)
+    {
+        logger.LogError("File exists in database but not on disk: {FileId}, Path: {Path}", fileId, file.OriginalPath);
+        return Results.NotFound();
+    }
+
+    var contentType = FileStorageService.GetContentType(file.FileType);
+
+    // Return file inline (no Content-Disposition: attachment)
+    return Results.File(stream, contentType, enableRangeProcessing: true);
+})
+.RequireAuthorization("ViewerOrAdmin");
 
 // Hangfire dashboard - available at /admin/jobs (Admin role only)
 app.MapHangfireDashboard("/admin/jobs", new DashboardOptions
