@@ -73,25 +73,52 @@ Full workflow: `.claude/docs/task-management.md`
 
 **The README.md must accurately reflect the current state of the project. Documentation drift is unacceptable.**
 
-### Automatic Update Triggers
+### What Must Be Kept Current
 
-You MUST run `@docs readme-check` when:
+The README has these sections that MUST be updated as features are implemented:
 
-| Trigger | When |
-|---------|------|
-| Task completion | Before running `/task complete` |
-| Feature commits | After any `feat()` commit succeeds |
-| Branch completion | Before creating PR/merge |
-| Session handoff | Before generating handoff |
+| Section | Update When |
+|---------|-------------|
+| **Project Status** | Phase changes, major milestones |
+| **Implemented Features** | Any new feature is working |
+| **API Endpoints** | New endpoints added |
+| **Configuration** | New appsettings keys added |
+| **Project Structure** | New directories/significant files |
 
-### Quick Check Process
+### Update Workflow
+
+**After EVERY `feat()` commit, you MUST:**
+
+1. **Check README.md** — Does it reflect the new feature?
+2. **Update "Implemented Features"** — Add the feature with brief description
+3. **Update "API Endpoints"** — If new endpoints were added
+4. **Update "Configuration"** — If new config keys were added
+5. **Commit separately** — `docs(readme): add [feature name]`
+
+**Example after implementing file serving:**
+```
+## Implemented Features
+### File Management
+- Secure file serving at `/files/{fileId}` (download) and `/files/{fileId}/view` (inline)  <- ADD THIS
+```
+
+### Trigger Checklist
+
+| Trigger | Action Required |
+|---------|-----------------|
+| `feat()` commit | Update Implemented Features section |
+| New endpoint | Add to API Endpoints table |
+| New config key | Add to Configuration section |
+| Phase completion | Update Project Status |
+| `/task complete` | Verify README reflects completed work |
+
+### Quick Check Command
 
 ```
-1. Run: @docs readme-check
-2. If issues found → Run: @docs readme update [section]
-3. Commit separately: docs(readme): update X section
-4. Continue with original task
+@docs readme-check
 ```
+
+This scans recent commits and flags README sections that may need updates.
 
 ---
 
@@ -179,6 +206,24 @@ Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `perf`, `style`
 - **Document** — PDF document (reports, manuals, etc.)
 - **Plan** — Engineering drawing/plan with title block
 
+### Project Root Cleanliness
+**Keep the project root as clean as possible.** Only essential files belong at the root level.
+
+**Allowed at root:**
+- `CLAUDE.md`, `README.md` — Project documentation
+- `.gitignore`, `.editorconfig` — Git and editor config
+- `docker-compose.yml` — Container orchestration
+- `*.sln` — Solution file
+- Standard dotfiles (`.claude/`, `.github/`, etc.)
+
+**Move elsewhere:**
+- Plans and design docs → `docs/plans/`
+- Scripts → `scripts/` or `.claude/`
+- Temporary files → Never commit
+- Config files for specific tools → Appropriate subdirectory when possible
+
+**Before adding a file to root, ask:** "Does this NEED to be at root level, or can it live in a subdirectory?"
+
 ---
 
 ## Methodology
@@ -250,6 +295,7 @@ BriansLegacyV2/
 | Long explanations after git | Subagent says minimal | Follow response format |
 | Using `net10.0` | Wrong framework | Use `net9.0` only |
 | Skipping `@docs readme-check` | Documentation drift | Always check before task complete |
+| Adding files to project root | Clutters root directory | Use appropriate subdirectory |
 
 ---
 
